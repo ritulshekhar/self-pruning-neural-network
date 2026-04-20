@@ -178,18 +178,22 @@ class PrunableLinear(nn.Module):
     # ------------------------------------------------------------------
     def get_gate_stats(self, threshold: float = 1e-2) -> dict:
         """
-        Return gate statistics without an extra forward pass.
+        Return gate statistics computed directly from gate_scores.
+
+        This always reflects the current state of gate_scores (no stale
+        cache dependency) and does not require a prior forward pass.
 
         Returns
         -------
         dict with keys:
-            gates       : flat tensor of current gate values (detached)
+            gates       : flat tensor of current gate values (detached, cpu)
             sparsity    : fraction of gates below `threshold`
             mean_gate   : mean gate value
             n_total     : total number of gates
             n_pruned    : number of gates below threshold
         """
-        gates = self._cached_gates.cpu().float()
+        with torch.no_grad():
+            gates = torch.sigmoid(self.gate_scores).cpu().float()
         n_total = gates.numel()
         n_pruned = (gates < threshold).sum().item()
         return {
@@ -524,7 +528,7 @@ def train(
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     # GradScaler only functional on CUDA; on CPU/MPS it's a no-op wrapper
-    scaler = torch.cuda.amp.GradScaler(enabled=(DEVICE.type == "cuda"))
+    scaler = torch.amp.GradScaler("cuda", enabled=(DEVICE.type == "cuda"))
 
     history = {
         "train_loss": [], "cls_loss": [], "spar_loss": [],
@@ -559,15 +563,8 @@ def train(
             f"({elapsed:.0f}s)"
         )
 
-    # Final evaluation
+    # Final evaluation (gate stats computed from live gate_scores, no extra pass needed)
     final_acc, final_sparsity, _ = evaluate(model, test_loader, lam)
-    gate_stats = model.get_all_gate_stats(threshold=1e-2)
-
-    # Force a forward pass to refresh _cached_gates buffers
-    model.eval()
-    with torch.no_grad():
-        sample, _ = next(iter(test_loader))
-        model(sample[:2].to(DEVICE))
     gate_stats = model.get_all_gate_stats(threshold=1e-2)
 
     print(f"\n  ✓ Final test accuracy : {final_acc:.2f}%")
