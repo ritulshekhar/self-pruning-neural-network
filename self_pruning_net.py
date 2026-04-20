@@ -54,9 +54,11 @@ Design Decisions
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
 
@@ -92,6 +94,8 @@ def get_device() -> torch.device:
 DEVICE = get_device()
 RESULTS_DIR = Path("results")
 RESULTS_DIR.mkdir(exist_ok=True)
+CHECKPOINT_DIR = Path("checkpoints")
+CHECKPOINT_DIR.mkdir(exist_ok=True)
 
 
 # ===========================================================================
@@ -332,6 +336,36 @@ class SelfPruningNet(nn.Module):
             "n_pruned": n_pruned,
         }
 
+    def get_per_layer_sparsity(self, threshold: float = 1e-2) -> List[dict]:
+        """
+        Return per-layer gate statistics for detailed analysis.
+
+        Returns a list of dicts (one per PrunableLinear layer) with:
+            layer_name  : e.g. "FC-0  (4096→512)"
+            n_weights   : total weights in layer
+            n_pruned    : weights effectively pruned
+            sparsity    : fraction pruned
+            mean_gate   : mean gate value
+        """
+        rows = []
+        shapes = [
+            (self._flat_dim, 512),
+            (512, 256),
+            (256, 10),
+        ]
+        for i, (layer, (in_f, out_f)) in enumerate(
+            zip(self.prunable_layers, shapes)
+        ):
+            stats = layer.get_gate_stats(threshold)
+            rows.append({
+                "layer_name": f"FC-{i}  ({in_f}→{out_f})",
+                "n_weights":  stats["n_total"],
+                "n_pruned":   stats["n_pruned"],
+                "sparsity":   stats["sparsity"] * 100,
+                "mean_gate":  stats["mean_gate"],
+            })
+        return rows
+
 
 # ===========================================================================
 # Part 2 — Data loading
@@ -566,10 +600,34 @@ def train(
     # Final evaluation (gate stats computed from live gate_scores, no extra pass needed)
     final_acc, final_sparsity, _ = evaluate(model, test_loader, lam)
     gate_stats = model.get_all_gate_stats(threshold=1e-2)
+    per_layer  = model.get_per_layer_sparsity(threshold=1e-2)
 
     print(f"\n  ✓ Final test accuracy : {final_acc:.2f}%")
     print(f"  ✓ Sparsity level      : {final_sparsity:.2f}%")
     print(f"  ✓ Best accuracy       : {best_acc:.2f}%")
+
+    # -- Per-layer sparsity breakdown --
+    print(f"\n  {'Layer':<20} {'Weights':>10} {'Pruned':>10} {'Sparsity':>10} {'Mean Gate':>10}")
+    print(f"  {'-'*62}")
+    for row in per_layer:
+        print(
+            f"  {row['layer_name']:<20} "
+            f"{row['n_weights']:>10,} "
+            f"{row['n_pruned']:>10,} "
+            f"{row['sparsity']:>9.1f}% "
+            f"{row['mean_gate']:>10.4f}"
+        )
+
+    # -- Save best checkpoint --
+    ckpt_path = CHECKPOINT_DIR / f"model_lam{lam:.0e}.pt"
+    torch.save({
+        "lam":       lam,
+        "epoch":     epochs,
+        "accuracy":  final_acc,
+        "sparsity":  final_sparsity,
+        "model_state_dict": model.state_dict(),
+    }, ckpt_path)
+    print(f"\n  ✓ Checkpoint saved → {ckpt_path}")
 
     return {
         "lam": lam,
@@ -579,6 +637,7 @@ def train(
         "history": history,
         "model": model,
         "gate_stats": gate_stats,
+        "per_layer": per_layer,
     }
 
 
@@ -683,6 +742,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    global args          # make accessible inside train() for JSON log
     args = parse_args()
 
     if args.dry_run:
@@ -715,7 +775,7 @@ def main() -> None:
     # -- Training curves (all lambdas)
     plot_training_curves(results, RESULTS_DIR / "training_curves.png")
 
-    # -- Gate distribution (best model)
+    # -- Gate distribution (best model by sparsity)
     if best_result:
         plot_gate_distribution(
             best_result["gate_stats"],
@@ -732,7 +792,32 @@ def main() -> None:
     for r in results:
         print(f"  {r['lam']:<12.0e} {r['accuracy']:<18.2f} {r['sparsity']:<15.2f}")
     print("=" * 60)
-    print("\n  Done. Results saved to ./results/")
+
+    # -- Dump experiment log (JSON) for reproducibility
+    exp_log = {
+        "timestamp": datetime.now().isoformat(),
+        "device":    str(DEVICE),
+        "epochs":    args.epochs,
+        "runs": [
+            {
+                "lam":        r["lam"],
+                "accuracy":   round(r["accuracy"],  4),
+                "sparsity":   round(r["sparsity"],  4),
+                "best_acc":   round(r["best_acc"],  4),
+                "per_layer":  r.get("per_layer", []),
+                "history": {
+                    k: [round(v, 6) for v in vals]
+                    for k, vals in r["history"].items()
+                },
+            }
+            for r in results
+        ],
+    }
+    log_path = RESULTS_DIR / "experiment_log.json"
+    with open(log_path, "w") as f:
+        json.dump(exp_log, f, indent=2)
+    print(f"\n  ✓ Experiment log saved → {log_path}")
+    print("\n  Done. Results saved to ./results/  |  Checkpoints in ./checkpoints/")
 
 
 if __name__ == "__main__":
