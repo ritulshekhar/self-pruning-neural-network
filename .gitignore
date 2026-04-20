@@ -46,3 +46,7 @@ data/
 training_log.txt
 wandb/
 runs/
+
+# Helper scripts (local use only, not part of submission)
+update_results.py
+update_report.py

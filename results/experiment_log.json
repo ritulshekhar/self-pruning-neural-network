@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-04-20T18:47:00",
+  "device": "mps",
+  "epochs": 30,
+  "architecture": "3-block CNN + 3x PrunableLinear head",
+  "dataset": "CIFAR-10",
+  "n_prunable_params": 2228234,
+  "optimizer": "Adam(lr=3e-3, weight_decay=1e-4)",
+  "lr_schedule": "CosineAnnealingLR(T_max=30)",
+  "sparsity_metric_note": "sparsity_threshold_pct counts gates < 0.01 (binary). gate_suppression_pct = 1 - (gate_L1_sum / N) measures actual weight-capacity reduction.",
+  "runs": [
+    {
+      "lam": 0.0001,
+      "accuracy": 89.24,
+      "best_acc": 89.24,
+      "sparsity_threshold_pct": 0.0,
+      "gate_l1_sum": 978927.4,
+      "gate_suppression_pct": 56.07,
+      "mean_gate": 0.4393,
+      "notes": "Mild regularisation; near-dense network performance"
+    },
+    {
+      "lam": 0.001,
+      "accuracy": 88.66,
+      "best_acc": 88.8,
+      "sparsity_threshold_pct": 0.0,
+      "gate_l1_sum": 408540.2,
+      "gate_suppression_pct": 81.67,
+      "mean_gate": 0.1833,
+      "notes": "Sweet spot: strong gate suppression with minimal accuracy cost"
+    },
+    {
+      "lam": 0.01,
+      "accuracy": 83.2,
+      "best_acc": 83.41,
+      "sparsity_threshold_pct": 0.0,
+      "gate_l1_sum": 77009.5,
+      "gate_suppression_pct": 96.54,
+      "mean_gate": 0.0346,
+      "notes": "Aggressive pruning; avg gate ~0.035; 96.5% weight influence suppressed"
+    }
+  ]
+}

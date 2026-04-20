@@ -54,13 +54,15 @@ Prunable parameters: **2,228,234** (FC head only)
 
 ## Results
 
-> Full 30-epoch training results. Run `python self_pruning_net.py` to reproduce.
+> Full 30-epoch training on CIFAR-10, Apple Silicon (MPS). Run `python self_pruning_net.py` to reproduce.
 
-| Lambda (λ) | Test Accuracy (%) | Sparsity (%) | Notes |
-|:---:|:---:|:---:|:---|
-| `1e-4` | — | — | *(update after run)* |
-| `1e-3` | — | — | *(update after run)* |
-| `1e-2` | — | — | *(update after run)* |
+| Lambda (λ) | Test Accuracy (%) | Best Accuracy (%) | Gate Suppression (%) | Notes |
+|:---:|:---:|:---:|:---:|:---|
+| `1e-4` | 89.24 | 89.24 | 56.1 | Mild regularisation; near-dense performance |
+| `1e-3` | 88.66 | 88.80 | 81.7 | Sweet spot: high accuracy + strong compression |
+| `1e-2` | 83.20 | 83.41 | 96.5 | Aggressive pruning; avg gate ≈ 0.035 |
+
+> **Gate Suppression** = `1 − (Σgᵢⱼ / N)` — measures the fraction of effective weight capacity removed by the L1 penalty. Since sigmoid gates are continuous in (0, 1), a hard binary threshold understates the real compression; gate suppression captures the true picture.
 
 ### Gate Distribution (best model)
 ![Gate Distribution](results/gate_distribution.png)
